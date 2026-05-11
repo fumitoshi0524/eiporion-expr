@@ -1,0 +1,21 @@
+# Dense BF16 continued pretraining config
+method: dense
+model: TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T
+data_path: data/slimpajama
+output_dir: checkpoints
+
+# Training
+lr: 1.0e-5
+min_lr: 1.0e-6
+warmup_steps: 100
+weight_decay: 0.1
+grad_clip: 1.0
+total_tokens: 5_000_000_000
+seq_length: 2048
+target_batch_size: 1_048_576
+
+# Logging
+log_interval: 100
+save_interval: 1000
+eval_interval: 2000
+seed: 42

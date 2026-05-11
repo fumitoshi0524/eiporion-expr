@@ -1,0 +1,24 @@
+[project]
+name = "eiporion-expr"
+version = "0.1.0"
+description = "Fair comparison experiment: eiporion INT8 training vs dense vs PTQ methods at 1B+ scale"
+requires-python = ">=3.12"
+
+dependencies = [
+    "torch>=2.0",
+    "transformers>=4.40",
+    "eiporion==0.1.0",
+    "bitsandbytes>=0.45.0,<0.46.0",
+    "datasets",
+    "lm-eval",
+    "swanlab",
+    "pyyaml",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+gptq = ["auto-gptq"]
+awq = ["autoawq"]
+
+[tool.setuptools]
+packages = []

@@ -117,9 +117,6 @@ def auto_batch_size(model, seq_length, device):
     torch.cuda.empty_cache()
 
     print(f"  Max micro batch size: {feasible} (target <{target_mb:.0f}MB, total {total_mb:.0f}MB)")
-    # Save to shared file so other methods use the same batch size
-    with open("checkpoints/.fair_batch_size", "w") as f:
-        f.write(str(feasible))
     return feasible
 
 
@@ -254,13 +251,18 @@ def train(args):
 
     # Auto-detect batch size — reuse dense's result for fair comparison
     if args.batch_size is None:
-        fair_file = "checkpoints/.fair_batch_size"
+        fair_file = os.path.join(args.output_dir, ".fair_batch_size")
         if args.method != "dense" and os.path.exists(fair_file):
             with open(fair_file) as f:
                 args.batch_size = int(f.read().strip())
-            print(f"  Using dense batch size for fairness: {args.batch_size}")
+            if is_main_process():
+                print(f"  Using dense batch size for fairness: {args.batch_size}")
         else:
             args.batch_size = auto_batch_size(model, args.seq_length, device)
+            if is_main_process():
+                os.makedirs(args.output_dir, exist_ok=True)
+                with open(fair_file, "w") as f:
+                    f.write(str(args.batch_size))
     model = model.to(device)
 
     tokens_per_micro_batch = args.batch_size * args.seq_length

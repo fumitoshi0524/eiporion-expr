@@ -1,0 +1,42 @@
+# BitaHub: eiporion experiment — all three methods in one job
+# Submit: bita apply -f bitahub.yaml
+#
+# SwanLab: create free account at https://swanlab.ai, get API key,
+# set SWANLAB_API_KEY env var below.
+#
+apiVersion: bitahub/v1
+kind: TrainingJob
+metadata:
+  name: eiporion-expr
+  labels: { experiment: eiporion-expr }
+
+spec:
+  image:
+    type: platform
+    framework: pytorch
+    version: "2.3.0"
+    cuda: "12.1"
+
+  taskConfig:
+    framework: other
+    roles:
+      - name: worker
+        resourceType: public
+        instanceType: a100-80g
+        nodeCount: 1
+
+  startupCommand: |
+    bash /code/setup.sh
+    bash /code/run_all.sh
+
+  storageMounts:
+    - { type: fileStorage, name: eiporion-output, mountPath: /mnt/output }
+
+  autoRetry:
+    enabled: true
+    maxRetries: 2
+    retryInterval: 60
+    conditions: [onFailure]
+
+  env:
+    - { name: SWANLAB_API_KEY, value: "RJXl0C2iyb1uY72Doib4K" }

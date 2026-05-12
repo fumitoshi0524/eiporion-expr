@@ -2,7 +2,7 @@
 
 import os
 import torch
-from datasets import load_dataset
+from datasets import Features, Value, load_dataset
 
 
 def save_checkpoint(model, optimizer, scheduler, step, path, save_hf=False):
@@ -62,8 +62,12 @@ def load_pretrain_dataset(data_path, tokenizer, seq_length, split_size=None):
         parquet_files = list(root.rglob("*.parquet"))
         if json_files:
             paths = [str(p) for p in json_files]
+            # ModelScope mirror has "text" + "default" columns.
+            # Explicit schema avoids CastError from "default" clashing
+            # with datasets' reserved field name.
+            features = Features({"text": Value("string")})
             dataset = load_dataset("json", data_files=paths, split="train",
-                                   field="text")
+                                   features=features)
         elif parquet_files:
             paths = [str(p) for p in parquet_files]
             dataset = load_dataset("parquet", data_files=paths, split="train")

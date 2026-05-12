@@ -2,8 +2,8 @@
 # BitaHub distributed training launch script
 # Parses platform env vars (VC_*) and launches PyTorch DDP training.
 #
-# Usage in BitaHub startup command:
-#   bash /code/launch.sh --method dense --data-path /mnt/data --model /mnt/models/TinyLlama-1.1B
+# Set METHOD env var in bitahub.yaml to choose dense|sr|mb_sr.
+# Additional CLI args can be passed after the script name.
 #
 set -e
 
@@ -28,7 +28,7 @@ echo "========================="
 
 # ---- Default paths (can be overridden by args) ----
 DATA_PATH=${DATA_PATH:-/mnt/data}
-MODEL_PATH=${MODEL_PATH:-/mnt/models/TinyLlama-1.1B}
+MODEL_PATH=${MODEL_PATH:-/mnt/output/models/TinyLlama-1.1B}
 OUTPUT_DIR=${OUTPUT_DIR:-/mnt/output/checkpoints}
 CONVERTED_MODEL=${CONVERTED_MODEL:-/mnt/output/eiporion_converted}
 
@@ -42,6 +42,7 @@ torchrun \
     --master_addr=$MASTER_ADDR \
     --master_port=$MASTER_PORT \
     train/continued_pretrain.py \
+    --method "${METHOD:-dense}" \
     --model "$MODEL_PATH" \
     --data-path "$DATA_PATH" \
     --output-dir "$OUTPUT_DIR" \

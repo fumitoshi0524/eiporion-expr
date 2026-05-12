@@ -1,0 +1,45 @@
+# BitaHub: eiporion MB-SR (momentum-biased stochastic rounding)
+# Submit: bita apply -f bitahub-mb-sr.yaml
+apiVersion: bitahub/v1
+kind: TrainingJob
+metadata:
+  name: eiporion-mb-sr
+  labels: { experiment: eiporion-expr, method: mb_sr }
+
+spec:
+  image:
+    type: platform
+    framework: pytorch
+    version: "2.3.0"
+    cuda: "12.1"
+
+  taskConfig:
+    framework: other
+    roles:
+      - name: worker
+        resourceType: public
+        instanceType: a100-80g
+        nodeCount: 1
+
+  startupCommand: |
+    bash /code/setup.sh
+    python /code/scripts/convert_to_eiporion.py --model /mnt/output/models/TinyLlama-1.1B --output /mnt/output/eiporion_converted
+    bash /code/launch.sh
+
+  storageMounts:
+    - { type: dataset, name: fineweb-edu, mountPath: /mnt/data }
+    - { type: fileStorage, name: eiporion-output, mountPath: /mnt/output }
+
+  tensorboard:
+    enabled: true
+    logPath: /mnt/output/tblogs
+
+  autoRetry:
+    enabled: true
+    maxRetries: 3
+    retryInterval: 60
+    conditions: [onFailure]
+
+  env:
+    - { name: METHOD, value: mb_sr }
+    - { name: SWANLAB_MODE, value: local }

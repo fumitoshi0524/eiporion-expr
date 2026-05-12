@@ -1,0 +1,50 @@
+# BitaHub: eiporion dense baseline
+# Submit: bita apply -f bitahub-dense.yaml
+#
+# Prerequisites (create in BitaHub console):
+#   Dataset "fineweb-edu"  -> mounted at /mnt/data
+#   Model   "tinyllama"    -> mounted at /mnt/models
+#   FileStorage "eiporion-output" -> mounted at /mnt/output
+#
+apiVersion: bitahub/v1
+kind: TrainingJob
+metadata:
+  name: eiporion-dense
+  labels: { experiment: eiporion-expr, method: dense }
+
+spec:
+  image:
+    type: platform
+    framework: pytorch
+    version: "2.3.0"
+    cuda: "12.1"
+
+  taskConfig:
+    framework: other
+    roles:
+      - name: worker
+        resourceType: public
+        instanceType: a100-80g
+        nodeCount: 1
+
+  startupCommand: |
+    bash /code/setup.sh
+    bash /code/launch.sh
+
+  storageMounts:
+    - { type: dataset, name: fineweb-edu, mountPath: /mnt/data }
+    - { type: fileStorage, name: eiporion-output, mountPath: /mnt/output }
+
+  tensorboard:
+    enabled: true
+    logPath: /mnt/output/tblogs
+
+  autoRetry:
+    enabled: true
+    maxRetries: 3
+    retryInterval: 60
+    conditions: [onFailure]
+
+  env:
+    - { name: METHOD, value: dense }
+    - { name: SWANLAB_MODE, value: local }

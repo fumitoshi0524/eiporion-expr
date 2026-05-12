@@ -5,6 +5,8 @@ set -e
 
 NPROC=${1:-4}
 
+export HF_DATASETS_CACHE=checkpoints/.cache
+
 MODEL=models/TinyLlama-1.1B
 DATA=data/slimpajama
 OUTPUT=checkpoints

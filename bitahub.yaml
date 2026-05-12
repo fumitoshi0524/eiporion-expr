@@ -26,8 +26,7 @@ spec:
         nodeCount: 1
 
   startupCommand: |
-    bash /code/setup.sh
-    bash /code/run_all.sh
+    cd /code/eiporion-expr && bash setup.sh && bash run_all.sh
 
   storageMounts:
     - { type: fileStorage, name: eiporion-output, mountPath: /mnt/output }

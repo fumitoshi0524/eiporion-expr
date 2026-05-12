@@ -6,15 +6,15 @@ MODEL_DIR=${MODEL_DIR:-/mnt/output/models/TinyLlama-1.1B}
 DATA_DIR=${DATA_DIR:-/mnt/data}
 
 echo "=== Setup: checking dependencies ==="
-pip install eiporion swanlab bitsandbytes datasets lm-eval modelscope -q
+pip install eiporion swanlab bitsandbytes datasets lm-eval huggingface_hub -q
 
 # ---- Download TinyLlama ----
 if [ -f "$MODEL_DIR/config.json" ]; then
     echo "TinyLlama already exists: $MODEL_DIR"
 else
-    echo "Downloading TinyLlama from ModelScope..."
+    echo "Downloading TinyLlama from HuggingFace..."
     python -c "
-from modelscope import snapshot_download
+from huggingface_hub import snapshot_download
 snapshot_download('TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T', local_dir='$MODEL_DIR')
 "
     echo "TinyLlama downloaded: $MODEL_DIR"

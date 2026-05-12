@@ -6,7 +6,7 @@ MODEL_DIR=${MODEL_DIR:-models/TinyLlama-1.1B}
 DATA_DIR=${DATA_DIR:-data/slimpajama}
 
 echo "=== Setup: installing dependencies ==="
-pip install eiporion swanlab bitsandbytes datasets lm-eval modelscope -q
+pip install eiporion swanlab bitsandbytes datasets lm-eval modelscope
 
 # ---- Download TinyLlama ----
 if [ -f "$MODEL_DIR/config.json" ]; then

@@ -37,7 +37,7 @@ def ddp_setup():
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
     dist.init_process_group(backend="nccl")
-    return local_rank, torch.cuda.current_device()
+    return local_rank, torch.device(f"cuda:{local_rank}")
 
 
 def is_main_process():

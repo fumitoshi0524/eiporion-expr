@@ -45,6 +45,13 @@ def _replace_linears_with_bitlinear(module, block_size=128):
             old_linear.in_features, old_linear.out_features,
             bias=old_linear.bias is not None,
         )
+        # Copy quantized weights (int_weight for INT8, weight_scale for scales)
+        weight_fp = old_linear.weight.data.float()
+        weight_int8, row_scales = quantize_fp_to_int8(weight_fp, 128)
+        bitlinear.int_weight.data.copy_(weight_int8)
+        bitlinear.weight_scale.data.copy_(row_scales)
+        if old_linear.bias is not None:
+            bitlinear.bias.data.copy_(old_linear.bias.data)
         setattr(parent, attr_name, bitlinear)
 
     return len(replacements)
@@ -108,6 +115,13 @@ def main():
             old_linear.in_features, old_linear.out_features,
             bias=old_linear.bias is not None,
         )
+        # Copy quantized weights (int_weight for INT8, weight_scale for scales)
+        weight_fp = old_linear.weight.data.float()
+        weight_int8, row_scales = quantize_fp_to_int8(weight_fp, 128)
+        bitlinear.int_weight.data.copy_(weight_int8)
+        bitlinear.weight_scale.data.copy_(row_scales)
+        if old_linear.bias is not None:
+            bitlinear.bias.data.copy_(old_linear.bias.data)
         setattr(parent, attr_name, bitlinear)
 
     print(f"  Replaced {len(replacements)} Linear → BitLinear")

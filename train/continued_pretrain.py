@@ -118,7 +118,7 @@ def _replace_linears(model, block_size, keep_lm_head=True):
         weight_int8, row_scales = quantize_fp_to_int8(weight_fp, block_size)
         bitlinear = BitLinear(old_linear.in_features, old_linear.out_features,
                               bias=old_linear.bias is not None)
-        bitlinear.weight.data.copy_(weight_int8)
+        bitlinear.int_weight.data.copy_(weight_int8)
         bitlinear.weight_scale.data.copy_(row_scales)
         if old_linear.bias is not None:
             bitlinear.bias.data.copy_(old_linear.bias.data)

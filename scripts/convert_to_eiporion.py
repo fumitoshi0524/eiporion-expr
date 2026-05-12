@@ -50,7 +50,7 @@ def replace_linears_with_bitlinear(model, block_size=128, keep_lm_head=True):
 
         # Create BitLinear and load quantized weights
         bitlinear = BitLinear(in_features, out_features, bias=has_bias)
-        bitlinear.weight.data.copy_(weight_int8)
+        bitlinear.int_weight.data.copy_(weight_int8)
         bitlinear.weight_scale.data.copy_(row_scales)
         if has_bias:
             bitlinear.bias.data.copy_(old_linear.bias.data)

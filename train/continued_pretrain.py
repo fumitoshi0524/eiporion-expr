@@ -12,8 +12,10 @@ import math
 import os
 import time
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DataLoader, DistributedSampler
 import swanlab
-from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
 from tqdm import tqdm
 
@@ -23,6 +25,23 @@ from train_utils import (
     save_checkpoint,
     load_checkpoint,
 )
+
+# ---- Distributed helpers ----
+
+def is_distributed():
+    return "LOCAL_RANK" in os.environ
+
+
+def ddp_setup():
+    """Initialize NCCL process group. Called once per process."""
+    local_rank = int(os.environ["LOCAL_RANK"])
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend="nccl")
+    return local_rank, torch.cuda.current_device()
+
+
+def is_main_process():
+    return not dist.is_initialized() or dist.get_rank() == 0
 
 
 def get_args():
@@ -217,8 +236,16 @@ def validate(model, val_loader, device, max_batches):
 
 
 def train(args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    torch.manual_seed(args.seed)
+    # ---- Distributed init ----
+    if is_distributed():
+        local_rank, device = ddp_setup()
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        local_rank = 0
+
+    if is_main_process():
+        print(f"Distributed: {is_distributed()}, device: {device}")
+    torch.manual_seed(args.seed + local_rank)
 
     model, optimizer, bit_modules = build_model_and_optimizer(args, device)
     tokenizer = AutoTokenizer.from_pretrained(args.model)
@@ -256,13 +283,16 @@ def train(args):
     val_dataset = tokenized_dataset.select(range(train_size, len(tokenized_dataset)))
     train_dataset = tokenized_dataset.select(range(train_size))
 
+    train_sampler = DistributedSampler(train_dataset) if is_distributed() else None
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=(train_sampler is None),
+        sampler=train_sampler,
         pin_memory=True,
         num_workers=2,
         prefetch_factor=2,
+        drop_last=True,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -272,41 +302,53 @@ def train(args):
         num_workers=1,
     )
 
+    # ---- Wrap model with DDP ----
+    if is_distributed():
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+        # DDP wraps the model — get the underlying module for save/eval
+        raw_model = model.module
+    else:
+        raw_model = model
+
     # LR scheduler
     scheduler = get_cosine_schedule_with_warmup(
         optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=total_steps,
     )
 
-    # ---- SwanLab init ----
+    # ---- SwanLab init (main process only) ----
     method_output = os.path.join(args.output_dir, args.method)
-    os.makedirs(method_output, exist_ok=True)
+    if is_main_process():
+        os.makedirs(method_output, exist_ok=True)
 
-    config_dict = {
-        "method": args.method,
-        "model": args.model,
-        "lr": args.lr,
-        "min_lr": args.min_lr,
-        "warmup_steps": args.warmup_steps,
-        "weight_decay": args.weight_decay,
-        "batch_size": args.batch_size,
-        "gradient_accumulation_steps": args.gradient_accumulation_steps,
-        "effective_batch_tokens": effective_batch_tokens,
-        "total_tokens": total_steps * effective_batch_tokens,
-        "seq_length": args.seq_length,
-        "block_size": args.block_size,
-        "sr_bias_scale": args.sr_bias_scale if args.method == "mb_sr" else 0.0,
-        "params_total": sum(p.numel() for p in model.parameters()),
-    }
+        config_dict = {
+            "method": args.method,
+            "model": args.model,
+            "lr": args.lr,
+            "min_lr": args.min_lr,
+            "warmup_steps": args.warmup_steps,
+            "weight_decay": args.weight_decay,
+            "batch_size": args.batch_size,
+            "gradient_accumulation_steps": args.gradient_accumulation_steps,
+            "effective_batch_tokens": effective_batch_tokens,
+            "total_tokens": total_steps * effective_batch_tokens,
+            "seq_length": args.seq_length,
+            "block_size": args.block_size,
+            "sr_bias_scale": args.sr_bias_scale if args.method == "mb_sr" else 0.0,
+            "world_size": dist.get_world_size() if is_distributed() else 1,
+            "params_total": sum(p.numel() for p in model.parameters()),
+        }
 
-    swanlab.init(
-        project=args.project_name,
-        experiment_name=f"{args.method}",
-        config=config_dict,
-    )
+        swanlab.init(
+            project=args.project_name,
+            experiment_name=f"{args.method}",
+            config=config_dict,
+        )
 
-    # Backup plain-text log
-    log_path = os.path.join(method_output, "train_log.jsonl")
-    log_file = open(log_path, "w")
+        log_path = os.path.join(method_output, "train_log.jsonl")
+        log_file = open(log_path, "w")
+    else:
+        log_file = None
+        log_path = None
 
     # Resume
     start_step = 0
@@ -315,22 +357,27 @@ def train(args):
 
     torch.cuda.reset_peak_memory_stats()
 
-    # ---- Print config ----
-    print(f"\n{'='*60}")
-    print(f"Method:        {args.method}")
-    print(f"Micro batch:   {args.batch_size} x {args.seq_length} = {tokens_per_micro_batch:,} tokens")
-    print(f"Grad accum:    {args.gradient_accumulation_steps} steps")
-    print(f"Effective:     {effective_batch_tokens:,} tokens/step")
-    print(f"Total steps:   {total_steps:,}")
-    print(f"Total tokens:  {total_steps * effective_batch_tokens:,}")
-    print(f"Params:        {config_dict['params_total']:,}")
-    print(f"{'='*60}\n")
+    # ---- Print config (main process only) ----
+    if is_main_process():
+        print(f"\n{'='*60}")
+        print(f"Method:        {args.method}")
+        print(f"Distributed:   {is_distributed()} (world_size={dist.get_world_size() if is_distributed() else 1})")
+        print(f"Micro batch:   {args.batch_size} x {args.seq_length} = {tokens_per_micro_batch:,} tokens")
+        print(f"Grad accum:    {args.gradient_accumulation_steps} steps")
+        print(f"Effective:     {effective_batch_tokens:,} tokens/step")
+        print(f"Total steps:   {total_steps:,}")
+        print(f"Total tokens:  {total_steps * effective_batch_tokens:,}")
+        print(f"Params:        {config_dict['params_total']:,}")
+        print(f"{'='*60}\n")
 
     model.train()
+    if train_sampler is not None:
+        train_sampler.set_epoch(0)
     global_step = start_step
     accumulation_loss = 0.0
 
-    pbar = tqdm(total=total_steps - start_step, desc=f"[{args.method}]")
+    pbar = tqdm(total=total_steps - start_step, desc=f"[{args.method}]",
+                disable=not is_main_process())
     data_iter = iter(train_loader)
     last_log_time = time.time()
 
@@ -365,41 +412,46 @@ def train(args):
 
         # ---- Logging ----
         if global_step % args.log_interval == 0:
-            now = time.time()
-            elapsed_since_log = now - last_log_time
-            tokens_since_log = effective_batch_tokens * args.log_interval
-            tokens_per_sec = tokens_since_log / elapsed_since_log if elapsed_since_log > 0 else 0
-            peak_mem_bytes = torch.cuda.max_memory_allocated()
-            peak_mem_mb = peak_mem_bytes / (1024 ** 2)
-            lr_now = scheduler.get_last_lr()[0]
+            # All-reduce loss across ranks for accurate logging
+            if is_distributed():
+                loss_tensor = torch.tensor(accumulation_loss, device=device)
+                dist.all_reduce(loss_tensor, op=dist.ReduceOp.AVG)
+                accumulation_loss = loss_tensor.item()
 
-            # SwanLab logging — each metric in its own group
-            log_data = {
-                "train/loss": accumulation_loss,
-                "train/perplexity": math.exp(accumulation_loss),
-                "train/learning_rate": lr_now,
-                "train/tokens_per_sec": tokens_per_sec,
-                "system/peak_gpu_memory_mb": peak_mem_mb,
-            }
+            if is_main_process():
+                now = time.time()
+                elapsed_since_log = now - last_log_time
+                tokens_since_log = effective_batch_tokens * args.log_interval
+                tokens_per_sec = tokens_since_log / elapsed_since_log if elapsed_since_log > 0 else 0
+                peak_mem_bytes = torch.cuda.max_memory_allocated()
+                peak_mem_mb = peak_mem_bytes / (1024 ** 2)
+                lr_now = scheduler.get_last_lr()[0]
 
-            if args.method == "dense":
-                log_data["train/grad_norm"] = grad_norm
+                log_data = {
+                    "train/loss": accumulation_loss,
+                    "train/perplexity": math.exp(accumulation_loss),
+                    "train/learning_rate": lr_now,
+                    "train/tokens_per_sec": tokens_per_sec,
+                    "system/peak_gpu_memory_mb": peak_mem_mb,
+                }
 
-            swanlab.log(log_data, step=global_step)
+                if args.method == "dense":
+                    log_data["train/grad_norm"] = grad_norm
 
-            # Backup JSONL log
-            json.dump({"step": global_step, **log_data}, log_file)
-            log_file.write("\n")
-            log_file.flush()
+                swanlab.log(log_data, step=global_step)
 
-            pbar.set_postfix({
-                "loss": f"{accumulation_loss:.4f}",
-                "lr": f"{lr_now:.2e}",
-                "tok/s": f"{tokens_per_sec:.0f}",
-                "mem": f"{peak_mem_mb:.0f}MB",
-            })
+                json.dump({"step": global_step, **log_data}, log_file)
+                log_file.write("\n")
+                log_file.flush()
 
-            last_log_time = time.time()
+                pbar.set_postfix({
+                    "loss": f"{accumulation_loss:.4f}",
+                    "lr": f"{lr_now:.2e}",
+                    "tok/s": f"{tokens_per_sec:.0f}",
+                    "mem": f"{peak_mem_mb:.0f}MB",
+                })
+
+                last_log_time = time.time()
 
         accumulation_loss = 0.0
         pbar.update(1)
@@ -407,34 +459,38 @@ def train(args):
         # ---- Validation ----
         if global_step % args.eval_interval == 0 and len(val_dataset) > 0:
             val_loss, val_ppl = validate(model, val_loader, device, args.val_samples)
-            swanlab.log({"eval/val_loss": val_loss, "eval/val_perplexity": val_ppl}, step=global_step)
-            json.dump({"step": global_step, "eval/val_loss": val_loss, "eval/val_perplexity": val_ppl}, log_file)
-            log_file.write("\n")
-            log_file.flush()
-            print(f"\n  [Step {global_step}] val_loss = {val_loss:.4f}, val_ppl = {val_ppl:.2f}")
+            if is_main_process():
+                swanlab.log({"eval/val_loss": val_loss, "eval/val_perplexity": val_ppl}, step=global_step)
+                json.dump({"step": global_step, "eval/val_loss": val_loss, "eval/val_perplexity": val_ppl}, log_file)
+                log_file.write("\n")
+                log_file.flush()
+                print(f"\n  [Step {global_step}] val_loss = {val_loss:.4f}, val_ppl = {val_ppl:.2f}")
 
         # ---- Checkpoint ----
-        if global_step % args.save_interval == 0:
+        if global_step % args.save_interval == 0 and is_main_process():
             ckpt_dir = os.path.join(method_output, f"step_{global_step}")
-            save_checkpoint(model, optimizer, scheduler, global_step, ckpt_dir,
+            save_checkpoint(raw_model, optimizer, scheduler, global_step, ckpt_dir,
                            save_hf=(args.method == "dense"))
 
     pbar.close()
 
-    # Final save
-    final_path = os.path.join(method_output, "final")
-    save_checkpoint(model, optimizer, scheduler, global_step, final_path,
-                   save_hf=(args.method == "dense"))
+    # Final save (only main process)
+    if is_main_process():
+        final_path = os.path.join(method_output, "final")
+        save_checkpoint(raw_model, optimizer, scheduler, global_step, final_path,
+                       save_hf=(args.method == "dense"))
 
-    peak_mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
-    swanlab.log({"system/final_peak_gpu_memory_mb": peak_mem_mb}, step=global_step)
+        peak_mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+        swanlab.log({"system/final_peak_gpu_memory_mb": peak_mem_mb}, step=global_step)
+        log_file.close()
+        swanlab.finish()
 
-    log_file.close()
-    swanlab.finish()
+        print(f"\nTraining complete. Final checkpoint: {final_path}")
+        print(f"Logs: {log_path}")
+        print(f"Peak GPU memory: {peak_mem_mb:.0f} MB")
 
-    print(f"\nTraining complete. Final checkpoint: {final_path}")
-    print(f"Logs: {log_path}")
-    print(f"Peak GPU memory: {peak_mem_mb:.0f} MB")
+    if is_distributed():
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

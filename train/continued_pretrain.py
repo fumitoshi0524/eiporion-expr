@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 from eiporion import EiporionOptim, EiporionOptimSR, collect_bitlinear_modules, quantize_fp_to_int8, BitLinear
 from train_utils import (
-    load_slimpajama,
+    load_pretrain_dataset,
     save_checkpoint,
     load_checkpoint,
 )
@@ -30,7 +30,7 @@ def get_args():
     parser.add_argument("--method", required=True, choices=["dense", "sr", "mb_sr"])
     parser.add_argument("--model", default="TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
     parser.add_argument("--converted-model", default="checkpoints/eiporion_converted")
-    parser.add_argument("--data-path", default="data/slimpajama")
+    parser.add_argument("--data-path", default="data/fineweb-edu")
     parser.add_argument("--output-dir", default="checkpoints")
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=None)
@@ -49,7 +49,8 @@ def get_args():
     parser.add_argument("--eval-interval", type=int, default=2000)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--from-checkpoint", default=None)
-    parser.add_argument("--profile-memory", action="store_true")
+    parser.add_argument("--profile-memory", action="store_true",
+                        help="Log memory stats but do not change batch size")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--val-samples", type=int, default=50,
                         help="Number of validation batches per eval")
@@ -97,6 +98,9 @@ def auto_batch_size(model, seq_length, device):
     torch.cuda.empty_cache()
 
     print(f"  Max micro batch size: {feasible} (target <{target_mb:.0f}MB, total {total_mb:.0f}MB)")
+    # Save to shared file so other methods use the same batch size
+    with open("checkpoints/.fair_batch_size", "w") as f:
+        f.write(str(feasible))
     return feasible
 
 
@@ -221,9 +225,15 @@ def train(args):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Auto-detect batch size
+    # Auto-detect batch size — reuse dense's result for fair comparison
     if args.batch_size is None:
-        args.batch_size = auto_batch_size(model, args.seq_length, device)
+        fair_file = "checkpoints/.fair_batch_size"
+        if args.method != "dense" and os.path.exists(fair_file):
+            with open(fair_file) as f:
+                args.batch_size = int(f.read().strip())
+            print(f"  Using dense batch size for fairness: {args.batch_size}")
+        else:
+            args.batch_size = auto_batch_size(model, args.seq_length, device)
     model = model.to(device)
 
     tokens_per_micro_batch = args.batch_size * args.seq_length
@@ -236,8 +246,8 @@ def train(args):
         total_steps = min(total_steps, args.max_steps)
 
     # Dataset — load and split BEFORE creating DataLoaders
-    print("Loading SlimPajama dataset...")
-    tokenized_dataset = load_slimpajama(
+    print("Loading pretraining dataset...")
+    tokenized_dataset = load_pretrain_dataset(
         args.data_path, tokenizer, args.seq_length,
         split_size=args.total_tokens // args.seq_length,
     )

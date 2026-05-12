@@ -47,22 +47,37 @@ def load_checkpoint(model, optimizer, scheduler, path):
     return step
 
 
-def load_slimpajama(data_path, tokenizer, seq_length, split_size=None):
-    """Load and tokenize SlimPajama dataset. Returns a tokenized HuggingFace Dataset.
+def load_pretrain_dataset(data_path, tokenizer, seq_length, split_size=None):
+    """Load and tokenize a pretraining dataset. Returns a tokenized HuggingFace Dataset.
 
-    Expects data in HuggingFace datasets format (json/parquet files).
-    Caller is responsible for creating DataLoaders.
+    data_path can be:
+      - A local directory with .json/.jsonl/.parquet files
+      - A HuggingFace dataset path like "HuggingFaceFW/fineweb-edu" with optional config
     """
-    try:
-        dataset = load_dataset("json", data_files=data_path, split="train")
-    except Exception:
-        try:
-            dataset = load_dataset("parquet", data_files=f"{data_path}/*.parquet", split="train")
-        except Exception:
-            raise FileNotFoundError(
-                f"Cannot load dataset from {data_path}. "
-                "Place SlimPajama .json or .parquet files in this directory."
-            )
+    # Try HF dataset name first (e.g. "HuggingFaceFW/fineweb-edu:CC-MAIN-2024-10")
+    if "/" in data_path and not os.path.isdir(data_path):
+        parts = data_path.split(":", 1)
+        ds_name = parts[0]
+        ds_config = parts[1] if len(parts) > 1 else None
+        kwargs = {"path": data_path, "split": "train", "streaming": True}
+        if ds_config:
+            kwargs = {"path": ds_name, "name": ds_config, "split": "train", "streaming": True}
+        dataset = load_dataset(**kwargs)
+    elif os.path.isdir(data_path):
+        # Local directory — try json, jsonl, then parquet
+        files = os.listdir(data_path)
+        json_files = [f for f in files if f.endswith(('.json', '.jsonl'))]
+        parquet_files = [f for f in files if f.endswith('.parquet')]
+        if json_files:
+            paths = [os.path.join(data_path, f) for f in json_files]
+            dataset = load_dataset("json", data_files=paths, split="train")
+        elif parquet_files:
+            paths = [os.path.join(data_path, f) for f in parquet_files]
+            dataset = load_dataset("parquet", data_files=paths, split="train")
+        else:
+            raise FileNotFoundError(f"No .json/.jsonl/.parquet files in {data_path}")
+    else:
+        raise FileNotFoundError(f"Dataset not found: {data_path}")
 
     if split_size and len(dataset) > split_size:
         dataset = dataset.select(range(split_size))

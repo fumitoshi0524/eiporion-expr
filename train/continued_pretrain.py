@@ -47,9 +47,9 @@ def is_main_process():
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--method", required=True, choices=["dense", "sr", "mb_sr"])
-    parser.add_argument("--model", default="TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T")
+    parser.add_argument("--model", default="models/TinyLlama-1.1B")
     parser.add_argument("--converted-model", default="checkpoints/eiporion_converted")
-    parser.add_argument("--data-path", default="data/fineweb-edu")
+    parser.add_argument("--data-path", default="data/slimpajama")
     parser.add_argument("--output-dir", default="checkpoints")
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=None)

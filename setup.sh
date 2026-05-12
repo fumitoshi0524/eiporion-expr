@@ -1,51 +1,36 @@
 #!/bin/bash
-# Auto-download models and data on BitaHub. Skips if already present.
+# Download everything from ModelScope. Skips if already present.
 set -e
 
-MODEL_DIR=${MODEL_DIR:-/mnt/output/models/TinyLlama-1.1B}
-DATA_DIR=${DATA_DIR:-/mnt/data}
+MODEL_DIR=${MODEL_DIR:-models/TinyLlama-1.1B}
+DATA_DIR=${DATA_DIR:-data/slimpajama}
 
-# HuggingFace mirror for faster downloads (set in BitaHub env vars)
-if [ -n "$HF_ENDPOINT" ]; then
-    export HF_ENDPOINT
-    echo "Using HF mirror: $HF_ENDPOINT"
-fi
-if [ -n "$HF_TOKEN" ]; then
-    echo "HF_TOKEN is set (authenticated)"
-fi
-
-echo "=== Setup: checking dependencies ==="
-pip install eiporion swanlab bitsandbytes datasets lm-eval huggingface_hub -q
+echo "=== Setup: installing dependencies ==="
+pip install eiporion swanlab bitsandbytes datasets lm-eval modelscope -q
 
 # ---- Download TinyLlama ----
 if [ -f "$MODEL_DIR/config.json" ]; then
     echo "TinyLlama already exists: $MODEL_DIR"
 else
-    echo "Downloading TinyLlama from HuggingFace..."
+    echo "Downloading TinyLlama from ModelScope..."
     python -c "
-from huggingface_hub import snapshot_download
-snapshot_download('TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T', local_dir='$MODEL_DIR')
+from modelscope import snapshot_download
+snapshot_download('AI-ModelScope/TinyLlama-1.1B-Chat-v1.0', local_dir='$MODEL_DIR')
 "
-    echo "TinyLlama downloaded: $MODEL_DIR"
 fi
 
-# ---- Download FineWeb-Edu ----
+# ---- Download SlimPajama-6B ----
 if [ "$(ls -A $DATA_DIR 2>/dev/null)" ]; then
-    echo "Data already exists: $DATA_DIR ($(ls $DATA_DIR | wc -l) files)"
+    echo "Data already exists: $DATA_DIR"
 else
-    echo "Downloading FineWeb-Edu from HuggingFace..."
+    echo "Downloading SlimPajama-6B from ModelScope..."
+    mkdir -p "$DATA_DIR"
     python -c "
-from datasets import load_dataset
-import os
-os.makedirs('$DATA_DIR', exist_ok=True)
-ds = load_dataset('HuggingFaceFW/fineweb-edu', 'sample-10BT', split='train', streaming=True)
-with open('$DATA_DIR/train.jsonl', 'w') as f:
-    for i, sample in enumerate(ds):
-        f.write('{\"text\": ' + repr(sample['text']) + '}\n')
-        if i % 100000 == 0: print(f'{i:,} docs...', flush=True)
-        if i >= 2_000_000: break
-print('Data downloaded: $DATA_DIR/train.jsonl')
+from modelscope import snapshot_download
+snapshot_download('YeungNLP/SlimPajama-6B', local_dir='$DATA_DIR')
 "
 fi
 
 echo "=== Setup complete ==="
+echo "Model: $MODEL_DIR"
+echo "Data:  $DATA_DIR"

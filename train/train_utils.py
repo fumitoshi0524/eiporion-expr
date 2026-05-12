@@ -109,23 +109,21 @@ def load_pretrain_dataset(data_path, tokenizer, seq_length, split_size=None):
             padding=False,
             return_attention_mask=False,
         )
-        result = {"input_ids": [], "labels": []}
+        input_ids_list = []
+        labels_list = []
         for ids in tokenized["input_ids"]:
             if len(ids) < seq_length + 1:
                 ids = ids + [tokenizer.pad_token_id or 0] * (seq_length + 1 - len(ids))
-            result["input_ids"].append(ids[:-1])
-            result["labels"].append(ids[1:])
-        return result
+            if len(ids) == seq_length + 1:
+                input_ids_list.append(ids[:-1])
+                labels_list.append(ids[1:])
+        return {"input_ids": input_ids_list, "labels": labels_list}
 
     tokenized_dataset = dataset.map(
         tokenize_fn,
         batched=True,
         remove_columns=dataset.column_names,
         desc="Tokenizing",
-    )
-
-    tokenized_dataset = tokenized_dataset.filter(
-        lambda x: len(x["input_ids"]) == seq_length
     )
 
     return tokenized_dataset

@@ -16,7 +16,7 @@ modelscope download AI-ModelScope/TinyLlama-1.1B-Chat-v1.0 --local_dir "$MODEL_D
 echo "Data already exists: $DATA_DIR"
 
 echo "Downloading SlimPajama-6B from ModelScope..."
-modelscope download YeungNLP/SlimPajama-6B --local_dir "$DATA_DIR"
+modelscope download --repo-type dataset YeungNLP/SlimPajama-6B --local_dir "$DATA_DIR"
 
 
 echo "=== Setup complete ==="

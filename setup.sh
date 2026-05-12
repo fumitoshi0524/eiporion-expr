@@ -5,6 +5,15 @@ set -e
 MODEL_DIR=${MODEL_DIR:-/mnt/output/models/TinyLlama-1.1B}
 DATA_DIR=${DATA_DIR:-/mnt/data}
 
+# HuggingFace mirror for faster downloads (set in BitaHub env vars)
+if [ -n "$HF_ENDPOINT" ]; then
+    export HF_ENDPOINT
+    echo "Using HF mirror: $HF_ENDPOINT"
+fi
+if [ -n "$HF_TOKEN" ]; then
+    echo "HF_TOKEN is set (authenticated)"
+fi
+
 echo "=== Setup: checking dependencies ==="
 pip install eiporion swanlab bitsandbytes datasets lm-eval huggingface_hub -q
 

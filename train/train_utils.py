@@ -54,34 +54,32 @@ def load_pretrain_dataset(data_path, tokenizer, seq_length, split_size=None):
       - A local directory with .json/.jsonl/.parquet files
       - A HuggingFace dataset path like "HuggingFaceFW/fineweb-edu" with optional config
     """
-    # Try HF dataset name first (e.g. "HuggingFaceFW/fineweb-edu:CC-MAIN-2024-10")
-    if "/" in data_path and not os.path.isdir(data_path):
-        parts = data_path.split(":", 1)
-        ds_name = parts[0]
-        ds_config = parts[1] if len(parts) > 1 else None
-        kwargs = {"path": data_path, "split": "train", "streaming": True}
-        if ds_config:
-            kwargs = {"path": ds_name, "name": ds_config, "split": "train", "streaming": True}
-        dataset = load_dataset(**kwargs)
-    elif os.path.isdir(data_path):
-        # Local directory — search recursively for parquet/json files
+    # Local directory first, then HF dataset name
+    if os.path.isdir(data_path):
         from pathlib import Path
         root = Path(data_path)
         json_files = list(root.rglob("*.json")) + list(root.rglob("*.jsonl"))
         parquet_files = list(root.rglob("*.parquet"))
         if json_files:
             paths = [str(p) for p in json_files]
-            dataset = load_dataset("json", data_files=paths, split="train")
+            dataset = load_dataset("json", data_files=paths, split="train",
+                                   field="text")
         elif parquet_files:
             paths = [str(p) for p in parquet_files]
             dataset = load_dataset("parquet", data_files=paths, split="train")
         else:
             raise FileNotFoundError(f"No .json/.jsonl/.parquet files found in {data_path}")
+    elif "/" in data_path:
+        dataset = load_dataset(data_path, split="train", streaming=True)
     else:
         raise FileNotFoundError(f"Dataset not found: {data_path}")
 
-    if split_size and len(dataset) > split_size:
-        dataset = dataset.select(range(split_size))
+    if split_size:
+        try:
+            if len(dataset) > split_size:
+                dataset = dataset.select(range(split_size))
+        except TypeError:
+            dataset = dataset.take(split_size)
 
     def tokenize_fn(examples):
         texts = examples["text"]

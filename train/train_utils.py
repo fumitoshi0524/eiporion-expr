@@ -64,18 +64,19 @@ def load_pretrain_dataset(data_path, tokenizer, seq_length, split_size=None):
             kwargs = {"path": ds_name, "name": ds_config, "split": "train", "streaming": True}
         dataset = load_dataset(**kwargs)
     elif os.path.isdir(data_path):
-        # Local directory — try json, jsonl, then parquet
-        files = os.listdir(data_path)
-        json_files = [f for f in files if f.endswith(('.json', '.jsonl'))]
-        parquet_files = [f for f in files if f.endswith('.parquet')]
+        # Local directory — search recursively for parquet/json files
+        from pathlib import Path
+        root = Path(data_path)
+        json_files = list(root.rglob("*.json")) + list(root.rglob("*.jsonl"))
+        parquet_files = list(root.rglob("*.parquet"))
         if json_files:
-            paths = [os.path.join(data_path, f) for f in json_files]
+            paths = [str(p) for p in json_files]
             dataset = load_dataset("json", data_files=paths, split="train")
         elif parquet_files:
-            paths = [os.path.join(data_path, f) for f in parquet_files]
+            paths = [str(p) for p in parquet_files]
             dataset = load_dataset("parquet", data_files=paths, split="train")
         else:
-            raise FileNotFoundError(f"No .json/.jsonl/.parquet files in {data_path}")
+            raise FileNotFoundError(f"No .json/.jsonl/.parquet files found in {data_path}")
     else:
         raise FileNotFoundError(f"Dataset not found: {data_path}")
 

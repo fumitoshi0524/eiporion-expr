@@ -1,9 +1,9 @@
 #!/bin/bash
-# Run all three methods sequentially on 4×4090.
+# Run all three methods sequentially on 1xA100 by default.
 # Usage: bash run_all.sh [nproc_per_node]
 set -e
 
-NPROC=${1:-4}
+NPROC=${1:-1}
 
 export HF_DATASETS_CACHE=checkpoints/.cache
 
@@ -13,7 +13,7 @@ OUTPUT=checkpoints
 CONVERTED=checkpoints/eiporion_converted
 
 echo "=========================================="
-echo "  eiporion experiment — 4×4090, $NPROC GPUs"
+echo "  eiporion experiment - 1xA100 default, $NPROC GPU(s)"
 echo "=========================================="
 
 # ---- Step 0: Convert TinyLlama to BitLinear (once) ----

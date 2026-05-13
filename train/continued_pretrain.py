@@ -271,7 +271,11 @@ def train(args):
     tokens_per_micro_batch = args.batch_size * args.seq_length
     if args.gradient_accumulation_steps is None:
         args.gradient_accumulation_steps = max(1, args.target_batch_size // tokens_per_micro_batch)
-    effective_batch_tokens = args.batch_size * args.seq_length * args.gradient_accumulation_steps
+    effective_batch_tokens_per_rank = (
+        args.batch_size * args.seq_length * args.gradient_accumulation_steps
+    )
+    world_size = dist.get_world_size() if is_distributed() else 1
+    effective_batch_tokens = effective_batch_tokens_per_rank * world_size
 
     total_steps = args.total_tokens // effective_batch_tokens
     if args.max_steps is not None:
@@ -363,12 +367,13 @@ def train(args):
             "weight_decay": args.weight_decay,
             "batch_size": args.batch_size,
             "gradient_accumulation_steps": args.gradient_accumulation_steps,
+            "effective_batch_tokens_per_rank": effective_batch_tokens_per_rank,
             "effective_batch_tokens": effective_batch_tokens,
             "total_tokens": total_steps * effective_batch_tokens,
             "seq_length": args.seq_length,
             "block_size": args.block_size,
             "sr_bias_scale": args.sr_bias_scale if args.method == "mb_sr" else 0.0,
-            "world_size": dist.get_world_size() if is_distributed() else 1,
+            "world_size": world_size,
             "params_total": sum(p.numel() for p in model.parameters()),
         }
 
@@ -395,10 +400,11 @@ def train(args):
     if is_main_process():
         print(f"\n{'='*60}")
         print(f"Method:        {args.method}")
-        print(f"Distributed:   {is_distributed()} (world_size={dist.get_world_size() if is_distributed() else 1})")
+        print(f"Distributed:   {is_distributed()} (world_size={world_size})")
         print(f"Micro batch:   {args.batch_size} x {args.seq_length} = {tokens_per_micro_batch:,} tokens")
         print(f"Grad accum:    {args.gradient_accumulation_steps} steps")
-        print(f"Effective:     {effective_batch_tokens:,} tokens/step")
+        print(f"Effective/rank:{effective_batch_tokens_per_rank:,} tokens/step")
+        print(f"Effective/all: {effective_batch_tokens:,} tokens/step")
         print(f"Total steps:   {total_steps:,}")
         print(f"Total tokens:  {total_steps * effective_batch_tokens:,}")
         print(f"Params:        {config_dict['params_total']:,}")

@@ -16,13 +16,16 @@ MASTER_ADDR=$(echo ${VC_WORKER_HOSTS} | awk -F ',' '{print $1}')
 MASTER_PORT=${MASTER_PORT:-29500}
 NNODES=${VC_WORKER_NUM:-1}
 NODE_RANK=${VC_TASK_INDEX:-0}
-NPROC_PER_NODE=${NPROC_PER_NODE:-$(nvidia-smi -L 2>/dev/null | wc -l)}
+GPU_COUNT=$(nvidia-smi -L 2>/dev/null | wc -l)
+# Default to single-GPU training (1xA100). Override with NPROC_PER_NODE if needed.
+NPROC_PER_NODE=${NPROC_PER_NODE:-1}
 
 echo "=== BitaHub DDP Config ==="
 echo "MASTER_ADDR:    $MASTER_ADDR"
 echo "MASTER_PORT:    $MASTER_PORT"
 echo "NNODES:         $NNODES"
 echo "NODE_RANK:      $NODE_RANK"
+echo "GPU_COUNT:      $GPU_COUNT"
 echo "NPROC_PER_NODE: $NPROC_PER_NODE"
 echo "========================="
 

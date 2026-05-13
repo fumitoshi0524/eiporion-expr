@@ -309,6 +309,9 @@ def train(args):
     train_size = int(0.999 * len(tokenized_dataset))
     val_dataset = tokenized_dataset.select(range(train_size, len(tokenized_dataset)))
     train_dataset = tokenized_dataset.select(range(train_size))
+    tensor_columns = [c for c in ("input_ids", "labels") if c in train_dataset.column_names]
+    train_dataset.set_format(type="torch", columns=tensor_columns)
+    val_dataset.set_format(type="torch", columns=tensor_columns)
 
     train_sampler = DistributedSampler(train_dataset) if is_distributed() else None
     train_loader_kwargs = dict(
@@ -422,8 +425,15 @@ def train(args):
                 data_iter = iter(train_loader)
                 batch = next(data_iter)
 
-            input_ids = batch["input_ids"].to(device)
-            labels = input_ids.clone()
+            input_ids = batch["input_ids"]
+            if not torch.is_tensor(input_ids):
+                input_ids = torch.tensor(input_ids, dtype=torch.long)
+            input_ids = input_ids.to(device, non_blocking=True)
+
+            labels = batch.get("labels", input_ids)
+            if not torch.is_tensor(labels):
+                labels = torch.tensor(labels, dtype=torch.long)
+            labels = labels.to(device, non_blocking=True)
 
             with torch.amp.autocast(device_type=device.type, dtype=torch.bfloat16):
                 outputs = model(input_ids=input_ids, labels=labels)

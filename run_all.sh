@@ -32,6 +32,7 @@ torchrun --nproc_per_node=$NPROC train/continued_pretrain.py \
     --model "$MODEL" \
     --data-path "$DATA" \
     --output-dir "$OUTPUT" \
+    --log-interval 5 \
     --project-name eiporion-expr
 
 # Read auto-detected batch size
@@ -48,6 +49,7 @@ torchrun --nproc_per_node=$NPROC train/continued_pretrain.py \
     --data-path "$DATA" \
     --output-dir "$OUTPUT" \
     --batch-size "$BATCH_SIZE" \
+    --log-interval 5 \
     --project-name eiporion-expr
 
 # ---- Step 3: MB-SR ----
@@ -60,6 +62,7 @@ torchrun --nproc_per_node=$NPROC train/continued_pretrain.py \
     --data-path "$DATA" \
     --output-dir "$OUTPUT" \
     --batch-size "$BATCH_SIZE" \
+    --log-interval 5 \
     --project-name eiporion-expr
 
 echo ""

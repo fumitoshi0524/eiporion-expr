@@ -37,14 +37,25 @@ def load_pretrain_dataset(data_path, tokenizer, seq_length, split_size=None):
     if os.path.isdir(data_path):
         from pathlib import Path
         root = Path(data_path)
-        json_files = list(root.rglob("*.json")) + list(root.rglob("*.jsonl"))
-        parquet_files = list(root.rglob("*.parquet"))
-        if json_files:
-            paths = [str(p) for p in json_files]
+        jsonl_files = sorted(root.rglob("*.jsonl"))
+        parquet_files = sorted(root.rglob("*.parquet"))
+        json_files = sorted(root.rglob("*.json"))
+
+        if jsonl_files:
+            # Prefer JSONL shards when present. Some datasets also ship metadata
+            # JSON files in the same directory, which break schema casting.
+            paths = [str(p) for p in jsonl_files]
             dataset = load_dataset("json", data_files=paths, split="train")
         elif parquet_files:
             paths = [str(p) for p in parquet_files]
             dataset = load_dataset("parquet", data_files=paths, split="train")
+        elif json_files:
+            metadata_json_names = {"dataset_info.json", "dataset_infos.json"}
+            data_json_files = [p for p in json_files if p.name.lower() not in metadata_json_names]
+            if not data_json_files:
+                raise FileNotFoundError(f"No data JSON files found in {data_path}")
+            paths = [str(p) for p in data_json_files]
+            dataset = load_dataset("json", data_files=paths, split="train")
         else:
             raise FileNotFoundError(f"No data files found in {data_path}")
     else:
@@ -57,8 +68,19 @@ def load_pretrain_dataset(data_path, tokenizer, seq_length, split_size=None):
         except TypeError:
             dataset = dataset.take(split_size)
 
+    text_column = "text" if "text" in dataset.column_names else None
+    if text_column is None:
+        for candidate in ("content", "default"):
+            if candidate in dataset.column_names:
+                text_column = candidate
+                break
+    if text_column is None:
+        raise ValueError(
+            f"Unable to find a text column. Available columns: {dataset.column_names}"
+        )
+
     def tokenize_fn(examples):
-        texts = examples["text"]
+        texts = examples[text_column]
         tokenized = tokenizer(
             texts, truncation=True, max_length=seq_length + 1,
             padding=False, return_attention_mask=False,

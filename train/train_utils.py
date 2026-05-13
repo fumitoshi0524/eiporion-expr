@@ -33,7 +33,14 @@ def load_checkpoint(model, optimizer, scheduler, path):
     return step
 
 
-def load_pretrain_dataset(data_path, tokenizer, seq_length, split_size=None):
+def load_pretrain_dataset(
+    data_path,
+    tokenizer,
+    seq_length,
+    split_size=None,
+    cache_dir=None,
+    keep_in_memory=False,
+):
     if os.path.isdir(data_path):
         from pathlib import Path
         root = Path(data_path)
@@ -45,21 +52,44 @@ def load_pretrain_dataset(data_path, tokenizer, seq_length, split_size=None):
             # Prefer JSONL shards when present. Some datasets also ship metadata
             # JSON files in the same directory, which break schema casting.
             paths = [str(p) for p in jsonl_files]
-            dataset = load_dataset("json", data_files=paths, split="train")
+            dataset = load_dataset(
+                "json",
+                data_files=paths,
+                split="train",
+                cache_dir=cache_dir,
+                keep_in_memory=keep_in_memory,
+            )
         elif parquet_files:
             paths = [str(p) for p in parquet_files]
-            dataset = load_dataset("parquet", data_files=paths, split="train")
+            dataset = load_dataset(
+                "parquet",
+                data_files=paths,
+                split="train",
+                cache_dir=cache_dir,
+                keep_in_memory=keep_in_memory,
+            )
         elif json_files:
             metadata_json_names = {"dataset_info.json", "dataset_infos.json"}
             data_json_files = [p for p in json_files if p.name.lower() not in metadata_json_names]
             if not data_json_files:
                 raise FileNotFoundError(f"No data JSON files found in {data_path}")
             paths = [str(p) for p in data_json_files]
-            dataset = load_dataset("json", data_files=paths, split="train")
+            dataset = load_dataset(
+                "json",
+                data_files=paths,
+                split="train",
+                cache_dir=cache_dir,
+                keep_in_memory=keep_in_memory,
+            )
         else:
             raise FileNotFoundError(f"No data files found in {data_path}")
     else:
-        dataset = load_dataset(data_path, split="train")
+        dataset = load_dataset(
+            data_path,
+            split="train",
+            cache_dir=cache_dir,
+            keep_in_memory=keep_in_memory,
+        )
 
     if split_size:
         try:
@@ -98,6 +128,8 @@ def load_pretrain_dataset(data_path, tokenizer, seq_length, split_size=None):
     tokenized_dataset = dataset.map(
         tokenize_fn, batched=True,
         remove_columns=dataset.column_names,
+        keep_in_memory=keep_in_memory,
+        load_from_cache_file=not keep_in_memory,
         desc="Tokenizing",
     )
     return tokenized_dataset

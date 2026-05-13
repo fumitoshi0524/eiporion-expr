@@ -15,6 +15,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
+from datasets import load_from_disk
 import swanlab
 from transformers import AutoModelForCausalLM, AutoTokenizer, get_cosine_schedule_with_warmup
 from tqdm import tqdm
@@ -74,6 +75,8 @@ def get_args():
     parser.add_argument("--val-samples", type=int, default=50,
                         help="Number of validation batches per eval")
     parser.add_argument("--project-name", default="eiporion-expr")
+    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--tokenized-cache-dir", default=None)
     return parser.parse_args()
 
 
@@ -274,35 +277,61 @@ def train(args):
     if args.max_steps is not None:
         total_steps = min(total_steps, args.max_steps)
 
-    # Dataset — load and split BEFORE creating DataLoaders
-    print("Loading pretraining dataset...")
-    tokenized_dataset = load_pretrain_dataset(
-        args.data_path, tokenizer, args.seq_length,
-        split_size=args.total_tokens // args.seq_length,
-    )
+    # Dataset — prepare once on rank 0, all ranks read from the same artifact
+    tokenized_cache_dir = args.tokenized_cache_dir
+    if tokenized_cache_dir is None:
+        tokenized_cache_dir = os.path.join(args.output_dir, "tokenized_dataset")
+
+    if is_distributed():
+        if is_main_process():
+            if not os.path.exists(tokenized_cache_dir):
+                print("Loading and tokenizing pretraining dataset...")
+                tokenized_dataset = load_pretrain_dataset(
+                    args.data_path, tokenizer, args.seq_length,
+                    split_size=args.total_tokens // args.seq_length,
+                )
+                cache_parent = os.path.dirname(tokenized_cache_dir)
+                if cache_parent:
+                    os.makedirs(cache_parent, exist_ok=True)
+                tokenized_dataset.save_to_disk(tokenized_cache_dir)
+                print(f"Saved tokenized dataset: {tokenized_cache_dir}")
+            else:
+                print(f"Using cached tokenized dataset: {tokenized_cache_dir}")
+        dist.barrier()
+        tokenized_dataset = load_from_disk(tokenized_cache_dir)
+    else:
+        print("Loading pretraining dataset...")
+        tokenized_dataset = load_pretrain_dataset(
+            args.data_path, tokenizer, args.seq_length,
+            split_size=args.total_tokens // args.seq_length,
+        )
     # Split off validation
     train_size = int(0.999 * len(tokenized_dataset))
     val_dataset = tokenized_dataset.select(range(train_size, len(tokenized_dataset)))
     train_dataset = tokenized_dataset.select(range(train_size))
 
     train_sampler = DistributedSampler(train_dataset) if is_distributed() else None
-    train_loader = DataLoader(
-        train_dataset,
+    train_loader_kwargs = dict(
         batch_size=args.batch_size,
         shuffle=(train_sampler is None),
         sampler=train_sampler,
         pin_memory=True,
-        num_workers=2,
-        prefetch_factor=2,
+        num_workers=args.num_workers,
         drop_last=True,
     )
-    val_loader = DataLoader(
-        val_dataset,
+    if args.num_workers > 0:
+        train_loader_kwargs["prefetch_factor"] = 2
+    train_loader = DataLoader(train_dataset, **train_loader_kwargs)
+
+    val_loader_kwargs = dict(
         batch_size=args.batch_size,
         shuffle=False,
         pin_memory=True,
-        num_workers=1,
+        num_workers=args.num_workers,
     )
+    if args.num_workers > 0:
+        val_loader_kwargs["prefetch_factor"] = 2
+    val_loader = DataLoader(val_dataset, **val_loader_kwargs)
 
     # ---- Wrap model with DDP ----
     if is_distributed():

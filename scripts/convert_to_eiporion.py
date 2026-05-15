@@ -46,7 +46,7 @@ def replace_linears_with_bitlinear(model, block_size=128, keep_lm_head=True):
 
         # Quantize FP32 weights to INT8
         weight_fp = old_linear.weight.data.float()
-        weight_int8, row_scales = quantize_fp_to_int8(weight_fp, block_size)
+        weight_int8, row_scales = quantize_fp_to_int8(weight_fp)
 
         # Create BitLinear and load quantized weights
         bitlinear = BitLinear(in_features, out_features, bias=has_bias)

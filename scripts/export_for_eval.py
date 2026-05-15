@@ -47,7 +47,7 @@ def _replace_linears_with_bitlinear(module, block_size=128):
         )
         # Copy quantized weights (int_weight for INT8, weight_scale for scales)
         weight_fp = old_linear.weight.data.float()
-        weight_int8, row_scales = quantize_fp_to_int8(weight_fp, 128)
+        weight_int8, row_scales = quantize_fp_to_int8(weight_fp)
         bitlinear.int_weight.data.copy_(weight_int8)
         bitlinear.weight_scale.data.copy_(row_scales)
         if old_linear.bias is not None:
@@ -117,7 +117,7 @@ def main():
         )
         # Copy quantized weights (int_weight for INT8, weight_scale for scales)
         weight_fp = old_linear.weight.data.float()
-        weight_int8, row_scales = quantize_fp_to_int8(weight_fp, 128)
+        weight_int8, row_scales = quantize_fp_to_int8(weight_fp)
         bitlinear.int_weight.data.copy_(weight_int8)
         bitlinear.weight_scale.data.copy_(row_scales)
         if old_linear.bias is not None:
